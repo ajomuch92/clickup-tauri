@@ -58,6 +58,7 @@ async fn clickup(args: Vec<String>, stdin: Option<String>) -> Result<Out, String
 pub fn run_app() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![clickup])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
