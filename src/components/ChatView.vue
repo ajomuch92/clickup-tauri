@@ -4,6 +4,7 @@ import { fmtDateTime } from "../util";
 import { channels, fetchMessages, fetchReactions, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
 import "emoji-picker-element";
 import { Database } from "emoji-picker-element";
+import Avatar from "./Avatar.vue";
 // ClickUp's reaction endpoint accepts Slack-style short names ("+1", "tada", "heart_eyes"); the iamcal preset is that list. Spanish presets emit localized names and are rejected.
 import emojiData from "emoji-picker-element-data/en/iamcal/data.json?url";
 
@@ -21,6 +22,7 @@ const glyphs = reactive<Record<string, string>>({}); // shortcode -> emoji, reso
 const db = new Database({ dataSource: emojiData });
 let timer: number | undefined;
 
+const others = (c: Channel) => (c.memberIds ?? []).filter((id) => id !== session.me);
 const sorted = computed(() =>
   [...channels.value].sort((a, b) => (a.type === "CHANNEL" ? 0 : 1) - (b.type === "CHANNEL" ? 0 : 1) || (b.latest_comment_at ?? 0) - (a.latest_comment_at ?? 0)),
 );
@@ -129,8 +131,11 @@ onUnmounted(() => clearInterval(timer));
     <ul class="uk-nav uk-nav-default channels">
       <li class="uk-nav-header">Canales</li>
       <li v-for="c in sorted" :key="c.id" :class="{ 'uk-active': c.id === active?.id }">
-        <a href="#" @click.prevent="open(c)">
-          <span :uk-icon="c.type === 'CHANNEL' ? 'hashtag' : 'user'"></span> {{ c.label ?? c.id }}
+        <a href="#" class="uk-flex uk-flex-middle" @click.prevent="open(c)">
+          <span v-if="c.type === 'CHANNEL'" uk-icon="hashtag" class="uk-margin-small-right"></span>
+          <Avatar v-else-if="others(c)[0]" :id="others(c)[0]" :size="22" class="uk-margin-small-right" />
+          <span v-else uk-icon="user" class="uk-margin-small-right"></span>
+          <span class="uk-text-truncate">{{ c.label ?? c.id }}</span>
           <span v-if="unread[c.id]" class="uk-badge">{{ unread[c.id] }}</span>
         </a>
       </li>
@@ -142,14 +147,18 @@ onUnmounted(() => clearInterval(timer));
       <p v-if="!active" class="uk-text-muted">Elige un canal.</p>
       <template v-else>
         <div class="uk-flex uk-flex-between uk-flex-middle">
-          <h3 class="uk-margin-remove">{{ active.label }}</h3>
+          <h3 class="uk-margin-remove uk-flex uk-flex-middle">
+            {{ active.label }}
+            <span class="uk-margin-small-left"><Avatar v-for="id in others(active)" :key="id" :id="id" :size="26" class="stack" /></span>
+          </h3>
           <button class="uk-button uk-button-default uk-button-small" @click="guard(load)"><span uk-icon="refresh"></span></button>
         </div>
         <div ref="box" class="messages">
           <article v-for="m in msgs" :key="m.id" class="uk-comment uk-margin-small" :class="{ 'uk-comment-primary': m.user_id === session.me }">
-            <header class="uk-comment-header uk-margin-remove">
-              <b>{{ who(m.user_id) }}</b> <span class="uk-text-muted uk-text-small">{{ fmtDateTime(m.date) }}</span>
-              <span class="uk-float-right actions">
+            <header class="uk-comment-header uk-margin-remove uk-flex uk-flex-middle">
+              <Avatar :id="m.user_id" :size="32" class="uk-margin-small-right" />
+              <b>{{ who(m.user_id) }}</b> <span class="uk-text-muted uk-text-small uk-margin-small-left">{{ fmtDateTime(m.date) }}</span>
+              <span class="actions uk-margin-auto-left">
                 <a href="#" uk-icon="reply" class="uk-icon-link" title="Responder" @click.prevent="replyTo = m"></a>
                 <a href="#" uk-icon="happy" class="uk-icon-link" title="Reaccionar" @click.prevent="pickFor = m"></a>
                 <a v-if="m.user_id === session.me" href="#" uk-icon="trash" class="uk-icon-link uk-text-danger" title="Borrar" @click.prevent="del(m)"></a>
@@ -189,6 +198,7 @@ onUnmounted(() => clearInterval(timer));
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .messages { flex: 1; overflow: auto; }
 .actions a { margin-left: 8px; }
+.stack { margin-left: -6px; border: 2px solid #fff; }
 .pill { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 0 8px; margin-right: 4px; cursor: pointer; font-size: 13px; }
 .pill.mine { border-color: #1e87f0; background: #e8f2fd; }
 .picker-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; z-index: 1000; }
