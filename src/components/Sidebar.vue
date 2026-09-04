@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { json } from "../cli";
 import type { View } from "../App.vue";
+import { unread } from "../chat";
 
 type List = { id: string; name: string; task_count?: string | number };
 type Folder = { id: string; name: string; lists: List[] };
@@ -50,7 +51,8 @@ onMounted(async () => {
 <template>
   <ul class="uk-nav uk-nav-default uk-padding-small uk-padding-remove-vertical">
     <li v-for="n in nav" :key="n.kind" :class="{ 'uk-active': active(n.kind) }">
-      <a href="#" @click.prevent="emit('navigate', { kind: n.kind })"><span :uk-icon="n.icon" class="uk-margin-small-right"></span>{{ n.label }}</a>
+      <a href="#" @click.prevent="emit('navigate', { kind: n.kind })"><span :uk-icon="n.icon" class="uk-margin-small-right"></span>{{ n.label }}
+        <span v-if="n.kind === 'chat' && Object.keys(unread).length" class="uk-badge">{{ Object.values(unread).reduce((a, b) => a + b, 0) }}</span></a>
     </li>
     <li class="uk-nav-divider"></li>
     <li class="uk-nav-header">Espacios</li>
