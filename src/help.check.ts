@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { parseHelp } from "./help.ts";
 import { makeThrottle } from "./throttle.ts";
+import { md } from "./md.ts";
 
 const c = parseHelp(["task", "list-add"], `
 Add tasks.
@@ -53,3 +54,10 @@ assert.ok(Date.now() - t0 < 50, "first 3 calls are immediate");
 await t();
 assert.ok(Date.now() - t0 >= 200, "4th call waits for the window");
 console.log("throttle.ts ok");
+
+assert.equal(md("**b** _i_ *i2* <u>u</u> ~~s~~ `c`"), "<b>b</b> <i>i</i> <i>i2</i> <u>u</u> <s>s</s> <code>c</code>");
+assert.equal(md("[@Ana López](#user_mention#1) hi"), '<span class="mention">@Ana López</span> hi');
+assert.equal(md("![:gandalf:](https://x.test/g.gif)"), '<img class="emo" src="https://x.test/g.gif" alt=":gandalf:" title=":gandalf:">');
+assert.equal(md('<script>alert(1)</script> [x](javascript:alert(1))'), "&lt;script&gt;alert(1)&lt;/script&gt; [x](javascript:alert(1))");
+assert.equal(md("snake_case_name and 2*3*4"), "snake_case_name and 2*3*4");
+console.log("md.ts ok");

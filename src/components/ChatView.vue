@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch as vwatch } from "vue";
 import { fmtDateTime } from "../util";
+import { md } from "../md";
 import { channels, fetchMessages, fetchReactions, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
 import "emoji-picker-element";
 import { Database } from "emoji-picker-element";
@@ -17,6 +18,8 @@ const error = ref("");
 const busy = ref(false);
 const box = ref<HTMLElement>();
 const pickFor = ref<Msg | null>(null);
+const pickInsert = ref(false); // picker opened from the compose toolbar
+const input = ref<HTMLTextAreaElement>();
 const reactions = ref<Record<string, Reaction[]>>({});
 const glyphs = reactive<Record<string, string>>({}); // shortcode -> emoji, resolved from the picker's own offline database
 const db = new Database({ dataSource: emojiData });
@@ -85,6 +88,21 @@ function open(ch: Channel) {
   guard(load);
 }
 
+/** Wrap the textarea selection (or insert at the caret) and keep focus. */
+function wrap(before: string, after = before) {
+  const el = input.value;
+  if (!el) return;
+  const { selectionStart: a, selectionEnd: b } = el;
+  const sel = text.value.slice(a, b);
+  text.value = text.value.slice(0, a) + before + sel + after + text.value.slice(b);
+  nextTick(() => { el.focus(); el.setSelectionRange(a + before.length, b + before.length); });
+}
+const FORMATS: Record<string, [string, string?]> = { b: ["**"], i: ["_"], u: ["<u>", "</u>"], e: ["`"] };
+function keys(e: KeyboardEvent) {
+  const f = (e.ctrlKey || e.metaKey) && FORMATS[e.key.toLowerCase()];
+  if (f) { e.preventDefault(); wrap(f[0], f[1]); }
+}
+
 async function send() {
   const t = text.value.trim();
   if (!active.value || !t) return;
@@ -99,6 +117,7 @@ async function send() {
 }
 
 async function react(e: CustomEvent) {
+  if (pickInsert.value) { pickInsert.value = false; wrap(e.detail.unicode, ""); return; }
   const m = pickFor.value;
   pickFor.value = null;
   const codes: string[] = e.detail.emoji.shortcodes ?? [];
@@ -171,7 +190,7 @@ onUnmounted(() => clearInterval(timer));
                 <a v-if="m.user_id === session.me" href="#" uk-icon="trash" class="uk-icon-link uk-text-danger" title="Borrar" @click.prevent="del(m)"></a>
               </span>
             </header>
-            <div class="uk-comment-body uk-margin-remove" style="white-space: pre-wrap">{{ m.content }}</div>
+            <div class="uk-comment-body uk-margin-remove md" v-html="md(m.content)"></div>
             <div v-if="m.replies_count || reactions[m.id]?.length" class="uk-text-small uk-text-muted uk-margin-small-top">
               <button v-for="p in pills(m)" :key="p.code" class="pill" :class="{ mine: p.mine }" :title="p.code" @click="toggle(m, p.code, p.mine)">
                 {{ glyph(p.code) }} {{ p.count }}
@@ -186,15 +205,22 @@ onUnmounted(() => clearInterval(timer));
             Respondiendo a {{ who(replyTo.user_id) }}: “{{ replyTo.content.slice(0, 60) }}”
             <a href="#" uk-icon="close" class="uk-icon-link" @click.prevent="replyTo = null"></a>
           </div>
+          <div class="toolbar">
+            <a href="#" uk-icon="bold" class="uk-icon-link" title="Negrita (Ctrl+B)" @click.prevent="wrap('**')"></a>
+            <a href="#" uk-icon="italic" class="uk-icon-link" title="Cursiva (Ctrl+I)" @click.prevent="wrap('_')"></a>
+            <a href="#" class="uk-icon-link ul" title="Subrayado (Ctrl+U)" @click.prevent="wrap('<u>', '</u>')">U</a>
+            <a href="#" uk-icon="code" class="uk-icon-link" title="Código (Ctrl+E)" @click.prevent="wrap('`')"></a>
+            <a href="#" uk-icon="happy" class="uk-icon-link" title="Emoji" @click.prevent="pickInsert = true"></a>
+          </div>
           <div class="uk-flex">
-            <textarea class="uk-textarea" rows="2" v-model="text" placeholder="Escribe un mensaje (Ctrl+Enter para enviar)" @keydown.ctrl.enter="send"></textarea>
+            <textarea ref="input" class="uk-textarea" rows="2" v-model="text" placeholder="Escribe un mensaje (Ctrl+Enter para enviar)" @keydown.ctrl.enter="send" @keydown="keys"></textarea>
             <button class="uk-button uk-button-primary uk-margin-small-left" :disabled="busy || !text.trim()">Enviar</button>
           </div>
         </form>
       </template>
     </div>
   </div>
-  <div v-if="pickFor" class="picker-overlay" @click.self="pickFor = null">
+  <div v-if="pickFor || pickInsert" class="picker-overlay" @click.self="pickFor = null; pickInsert = false">
     <emoji-picker :data-source="emojiData" @emoji-click="react($event as CustomEvent)"></emoji-picker>
   </div>
 </template>
@@ -205,6 +231,12 @@ onUnmounted(() => clearInterval(timer));
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .messages { flex: 1; overflow: auto; }
 .actions a { margin-left: 8px; }
+.toolbar a { margin-right: 10px; }
+.toolbar .ul { text-decoration: underline; font-weight: 700; font-size: 15px; }
+.md { white-space: pre-wrap; }
+.md :deep(code) { background: #f3f3f3; padding: 0 4px; border-radius: 3px; }
+.md :deep(.mention) { color: #1e87f0; font-weight: 600; }
+.md :deep(.emo) { height: 1.4em; vertical-align: middle; }
 .stack { margin-left: -6px; border: 2px solid #fff; }
 .pill { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 0 8px; margin-right: 4px; cursor: pointer; font-size: 13px; }
 .pill.mine { border-color: #1e87f0; background: #e8f2fd; }
