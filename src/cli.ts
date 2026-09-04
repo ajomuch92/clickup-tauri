@@ -1,9 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseHelp, type Cmd } from "./help";
+import { makeThrottle } from "./throttle";
 
 export type Out = { code: number; stdout: string; stderr: string };
 
-export const run = (args: string[], stdin?: string) => invoke<Out>("clickup", { args, stdin });
+// ponytail: ClickUp allows 100 API calls/min per token; queue anything above 80 so bursts wait instead of failing with 429.
+const throttle = makeThrottle(80, 60_000);
+
+export async function run(args: string[], stdin?: string) {
+  if (!args.includes("--help") && args[0] !== "auth") await throttle(); // local-only commands cost nothing
+  return invoke<Out>("clickup", { args, stdin });
+}
 
 export async function help(path: string[], short = ""): Promise<Cmd> {
   const o = await run([...path, "--help"]);

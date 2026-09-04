@@ -1,6 +1,7 @@
 // Self-check: `pnpm check`. Fails loudly if the help parser breaks.
 import assert from "node:assert/strict";
 import { parseHelp } from "./help.ts";
+import { makeThrottle } from "./throttle.ts";
 
 const c = parseHelp(["task", "list-add"], `
 Add tasks.
@@ -44,3 +45,11 @@ const g = parseHelp(["task"], "Usage:\n  clickup task <command> [flags]\n  click
 assert.deepEqual(g.subs, [{ name: "view", short: "View tasks" }]);
 assert.deepEqual(g.positionals, [{ name: "command", optional: false, variadic: false }]);
 console.log("help.ts ok");
+
+const t = makeThrottle(3, 200);
+const t0 = Date.now();
+await t(); await t(); await t();
+assert.ok(Date.now() - t0 < 50, "first 3 calls are immediate");
+await t();
+assert.ok(Date.now() - t0 >= 200, "4th call waits for the window");
+console.log("throttle.ts ok");

@@ -46,7 +46,11 @@ async function label(ch: Channel) {
   ch.label = (r.data ?? []).filter((m) => m.id !== session.me).map((m) => m.name).join(", ") || ch.id;
 }
 
-export async function loadChannels() {
+let inflight: Promise<Channel[]> | null = null;
+export function loadChannels() {
+  return (inflight ??= loadChannelsNow().finally(() => (inflight = null))); // callers racing at startup share one round of requests
+}
+async function loadChannelsNow() {
   await loadSession();
   const fresh = (await json<{ data: Channel[] }>(["api", "--v3", v3("chat/channels")])).data ?? [];
   const known = new Map(channels.value.map((c) => [c.id, c]));

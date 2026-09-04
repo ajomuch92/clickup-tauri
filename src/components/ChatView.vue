@@ -57,9 +57,11 @@ async function loadReactions(id: string) {
   reactions.value[id] = await fetchReactions(id);
 }
 
-// ponytail: reactions are one request per message and ClickUp allows 100/min, so only the newest 20 get them.
-const REACTION_WINDOW = 20;
-const refreshReactions = () => Promise.all(msgs.value.slice(-REACTION_WINDOW).map((m) => loadReactions(m.id).catch(() => {})));
+// ponytail: reactions are one request per message and ClickUp allows 100/min. Cached across channels; only the newest few are (re)fetched.
+const OPEN_WINDOW = 10;
+const REFRESH_WINDOW = 5;
+const refreshReactions = (n = REFRESH_WINDOW, onlyMissing = false) =>
+  Promise.all(msgs.value.slice(-n).filter((m) => !onlyMissing || !(m.id in reactions.value)).map((m) => loadReactions(m.id).catch(() => {})));
 
 async function load() {
   if (!active.value) return;
@@ -67,7 +69,7 @@ async function load() {
   delete unread[active.value.id];
   await nextTick();
   box.value?.scrollTo(0, box.value.scrollHeight);
-  await refreshReactions();
+  await refreshReactions(OPEN_WINDOW, true);
 }
 
 async function toggle(m: Msg, code: string, mine: boolean) {
