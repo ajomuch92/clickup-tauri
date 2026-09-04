@@ -2,6 +2,9 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { json, run } from "../cli";
 import { fmtDateTime } from "../util";
+import "emoji-picker-element";
+// en/cldr shortcodes ("thumbs_up", "saluting_face") are exactly what ClickUp stores; the es set is localized and would not match.
+import emojiData from "emoji-picker-element-data/en/cldr/data.json?url";
 
 // ponytail: `clickup chat list` crashes on the API's numeric created_at (CLI bug), so everything goes through the raw `api --v3` endpoints.
 type Channel = { id: string; name: string | null; type: string; latest_comment_at?: number; label?: string };
@@ -18,6 +21,8 @@ const replyTo = ref<Msg | null>(null);
 const error = ref("");
 const busy = ref(false);
 const box = ref<HTMLElement>();
+const pickFor = ref<Msg | null>(null);
+const reacted = ref<Record<string, string[]>>({}); // local echo of my reactions this session; the list endpoint does not inline them
 let timer: number | undefined;
 
 const v3 = (path: string) => `workspaces/${ws.value}/${path}`;
@@ -62,9 +67,15 @@ async function send() {
   busy.value = false;
 }
 
-async function react(m: Msg) {
-  const e = prompt("Emoji (ej. thumbsup, rocket):");
-  if (e) await guard(() => post(`chat/messages/${m.id}/reactions`, { reaction: e.trim() }));
+async function react(e: CustomEvent) {
+  const m = pickFor.value;
+  pickFor.value = null;
+  const code = e.detail.emoji.shortcodes?.[0];
+  if (!m || !code) return;
+  await guard(async () => {
+    await post(`chat/messages/${m.id}/reactions`, { reaction: code });
+    (reacted.value[m.id] ??= []).push(e.detail.unicode);
+  });
 }
 
 async function del(m: Msg) {
@@ -121,21 +132,24 @@ onUnmounted(() => clearInterval(timer));
           <article v-for="m in msgs" :key="m.id" class="uk-comment uk-margin-small" :class="{ 'uk-comment-primary': m.user_id === me }">
             <header class="uk-comment-header uk-margin-remove">
               <b>{{ who(m.user_id) }}</b> <span class="uk-text-muted uk-text-small">{{ fmtDateTime(m.date) }}</span>
-              <span class="uk-float-right uk-text-small">
-                <a href="#" @click.prevent="replyTo = m">Responder</a> ·
-                <a href="#" @click.prevent="react(m)">Reaccionar</a>
-                <template v-if="m.user_id === me"> · <a href="#" class="uk-text-danger" @click.prevent="del(m)">Borrar</a></template>
+              <span class="uk-float-right actions">
+                <a href="#" uk-icon="reply" class="uk-icon-link" title="Responder" @click.prevent="replyTo = m"></a>
+                <a href="#" uk-icon="happy" class="uk-icon-link" title="Reaccionar" @click.prevent="pickFor = m"></a>
+                <a v-if="m.user_id === me" href="#" uk-icon="trash" class="uk-icon-link uk-text-danger" title="Borrar" @click.prevent="del(m)"></a>
               </span>
             </header>
             <div class="uk-comment-body uk-margin-remove" style="white-space: pre-wrap">{{ m.content }}</div>
-            <div v-if="m.replies_count" class="uk-text-small uk-text-muted">{{ m.replies_count }} respuestas</div>
+            <div v-if="m.replies_count || reacted[m.id]" class="uk-text-small uk-text-muted">
+              <span v-for="(u, i) in reacted[m.id]" :key="i" class="uk-margin-small-right">{{ u }}</span>
+              <span v-if="m.replies_count">{{ m.replies_count }} respuestas</span>
+            </div>
           </article>
           <p v-if="!msgs.length" class="uk-text-muted">Sin mensajes.</p>
         </div>
         <form class="uk-margin-small-top" @submit.prevent="send">
           <div v-if="replyTo" class="uk-text-small uk-text-muted">
             Respondiendo a {{ who(replyTo.user_id) }}: “{{ replyTo.content.slice(0, 60) }}”
-            <a href="#" @click.prevent="replyTo = null">✕</a>
+            <a href="#" uk-icon="close" class="uk-icon-link" @click.prevent="replyTo = null"></a>
           </div>
           <div class="uk-flex">
             <textarea class="uk-textarea" rows="2" v-model="text" placeholder="Escribe un mensaje (Ctrl+Enter para enviar)" @keydown.ctrl.enter="send"></textarea>
@@ -145,9 +159,14 @@ onUnmounted(() => clearInterval(timer));
       </template>
     </div>
   </div>
+  <div v-if="pickFor" class="picker-overlay" @click.self="pickFor = null">
+    <emoji-picker :data-source="emojiData" @emoji-click="react($event as CustomEvent)"></emoji-picker>
+  </div>
 </template>
 
 <style scoped>
+.actions a { margin-left: 8px; }
+.picker-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .chat { display: flex; height: calc(100vh - 60px); gap: 20px; }
 .channels { width: 240px; flex: none; overflow: auto; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
