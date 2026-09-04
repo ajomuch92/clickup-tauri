@@ -3,12 +3,17 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { json, run } from "./cli";
 
 // ponytail: `clickup chat list` crashes on the API's numeric created_at (CLI bug), so everything goes through the raw `api --v3` endpoints.
-export type Channel = { id: string; name: string | null; type: string; latest_comment_at?: number; label?: string };
+export type Channel = { id: string; name: string | null; type: string; latest_comment_at?: number; label?: string; memberIds?: string[] };
+export type User = { id: string; username: string; initials?: string; color?: string | null; profilePicture?: string | null; last_active?: string };
 export type Msg = { id: string; user_id: string; content: string; date: number; replies_count?: number };
 
 export const session = reactive({ ws: "", me: "" });
 export const channels = ref<Channel[]>([]);
 export const members = reactive<Record<string, string>>({});
+export const users = reactive<Record<string, User>>({});
+export const now = ref(Date.now());
+// ponytail: ClickUp has no public presence API; "online" = UI activity in the last 10 min, refreshed by the watcher tick.
+export const isOnline = (id: string | number) => now.value - Number(users[String(id)]?.last_active ?? 0) < 10 * 60_000;
 export const unread = reactive<Record<string, number>>({}); // channel id -> new messages since last opened
 export const who = (id: string) => members[String(id)] ?? id;
 const v3 = (path: string) => `workspaces/${session.ws}/${path}`;
@@ -19,9 +24,17 @@ export async function loadSession() {
   session.ws = st.match(/Workspace:\s+(\S+)/)?.[1] ?? "";
   session.me = st.match(/User ID:\s+(\S+)/)?.[1] ?? "";
   if (!session.ws) throw new Error("No hay workspace configurado. Ejecuta `clickup auth login`.");
-  try {
-    for (const m of await json<any[]>(["member", "list"])) members[String(m.id)] = m.username;
-  } catch { /* names are cosmetic */ }
+  await loadUsers().catch(() => {}); // names, avatars and presence are cosmetic
+}
+
+export async function loadUsers() {
+  const r = await json<{ teams: { id: string; members: { user: any }[] }[] }>(["api", "team"]);
+  const team = r.teams.find((t) => t.id === session.ws) ?? r.teams[0];
+  for (const { user } of team?.members ?? []) {
+    users[String(user.id)] = { ...user, id: String(user.id) };
+    members[String(user.id)] = user.username;
+  }
+  now.value = Date.now();
 }
 
 // DMs come with name=null: label them with the other participants.
@@ -29,6 +42,7 @@ async function label(ch: Channel) {
   if (ch.name) return (ch.label = ch.name);
   const r = await json<{ data: { id: string; name: string }[] }>(["api", "--v3", v3(`chat/channels/${ch.id}/members`)]);
   for (const m of r.data ?? []) members[m.id] ??= m.name;
+  ch.memberIds = (r.data ?? []).map((m) => m.id);
   ch.label = (r.data ?? []).filter((m) => m.id !== session.me).map((m) => m.name).join(", ") || ch.id;
 }
 
@@ -62,7 +76,7 @@ export function watch(onNew: (ch: Channel, msg: Msg) => void, everyMs = 45_000) 
   let primed = false;
   const tick = async () => {
     try {
-      const list = await loadChannels();
+      const [list] = await Promise.all([loadChannels(), loadUsers().catch(() => {})]);
       const changed = primed ? list.filter((c) => (c.latest_comment_at ?? 0) > (seen[c.id] ?? 0)) : [];
       for (const c of list) seen[c.id] = c.latest_comment_at ?? 0;
       primed = true;
