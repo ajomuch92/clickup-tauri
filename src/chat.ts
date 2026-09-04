@@ -67,6 +67,10 @@ export async function fetchMessages(channelId: string) {
   return (r.data ?? []).sort((a, b) => a.date - b.date);
 }
 
+export async function fetchReplies(msgId: string) {
+  return ((await json<{ data: Msg[] }>(["api", "--v3", v3(`chat/messages/${msgId}/replies`)])).data ?? []).sort((a, b) => a.date - b.date);
+}
+
 export type Reaction = { reaction: string; user_id: string | number };
 export async function fetchReactions(msgId: string) {
   return (await json<{ data: Reaction[] }>(["api", "--v3", v3(`chat/messages/${msgId}/reactions`)])).data ?? [];

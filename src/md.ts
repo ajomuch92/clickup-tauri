@@ -4,6 +4,7 @@ const url = (u: string) => (/^https?:\/\//i.test(u) ? u : "");
 
 export function md(src: string): string {
   return esc(src)
+    .replace(/\\([\\`*_~\[\]()#!<>-])/g, (_, c) => `&#${c.charCodeAt(0)};`) // markdown escapes: literal char, invisible to the rules below
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, u) =>
       url(u) ? `<img class="${/^:.*:$/.test(alt) ? "emo" : "img"}" src="${u}" alt="${alt}" title="${alt}">` : alt)

@@ -61,4 +61,5 @@ assert.equal(md("![:gandalf:](https://x.test/g.gif)"), '<img class="emo" src="ht
 assert.equal(md('<script>alert(1)</script> [x](javascript:alert(1))'), "&lt;script&gt;alert(1)&lt;/script&gt; [x](javascript:alert(1))");
 assert.equal(md("snake_case_name and 2*3*4"), "snake_case_name and 2*3*4");
 assert.equal(md("![shot.png](https://x.test/s.png)"), '<img class="img" src="https://x.test/s.png" alt="shot.png" title="shot.png">');
+assert.equal(md("order\\_6a8\\_1.json and \\*not bold\\*"), "order&#95;6a8&#95;1.json and &#42;not bold&#42;");
 console.log("md.ts ok");
