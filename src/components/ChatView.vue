@@ -3,8 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch as vwatch } from
 import { fmtDateTime } from "../util";
 import { channels, fetchMessages, loadChannels, post, session, unread, who, type Channel, type Msg } from "../chat";
 import "emoji-picker-element";
-// en/cldr shortcodes ("thumbs_up", "saluting_face") are exactly what ClickUp stores; the es set is localized and would not match.
-import emojiData from "emoji-picker-element-data/en/cldr/data.json?url";
+// ClickUp's reaction endpoint accepts Slack-style short names ("+1", "tada", "heart_eyes"); the iamcal preset is that list. Spanish presets emit localized names and are rejected.
+import emojiData from "emoji-picker-element-data/en/iamcal/data.json?url";
 
 const props = defineProps<{ openId?: string | null }>();
 const active = ref<Channel | null>(null);
@@ -57,10 +57,14 @@ async function send() {
 async function react(e: CustomEvent) {
   const m = pickFor.value;
   pickFor.value = null;
-  const code = e.detail.emoji.shortcodes?.[0];
-  if (!m || !code) return;
+  const codes: string[] = e.detail.emoji.shortcodes ?? [];
+  if (!m || !codes.length) return;
   await guard(async () => {
-    await post(`chat/messages/${m.id}/reactions`, { reaction: code });
+    let err: unknown;
+    for (const code of codes) { // aliases differ per emoji ("+1" works, "thumbsup" does not): try each until ClickUp accepts one
+      try { await post(`chat/messages/${m.id}/reactions`, { reaction: code }); err = null; break; } catch (x) { err = x; }
+    }
+    if (err) throw err;
     (reacted.value[m.id] ??= []).push(e.detail.unicode);
   });
 }
