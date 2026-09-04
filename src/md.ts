@@ -5,7 +5,8 @@ const url = (u: string) => (/^https?:\/\//i.test(u) ? u : "");
 export function md(src: string): string {
   return esc(src)
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-    .replace(/!\[(:[^\]]+:)\]\(([^)\s]+)\)/g, (_, alt, u) => (url(u) ? `<img class="emo" src="${u}" alt="${alt}" title="${alt}">` : alt))
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, u) =>
+      url(u) ? `<img class="${/^:.*:$/.test(alt) ? "emo" : "img"}" src="${u}" alt="${alt}" title="${alt}">` : alt)
     .replace(/\[@([^\]]+)\]\(#[^)]*\)/g, '<span class="mention">@$1</span>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => (url(u) ? `<a href="${u}" target="_blank">${t}</a>` : m))
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")

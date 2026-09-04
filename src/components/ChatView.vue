@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch as vwatch } from "vue";
 import { fmtDateTime } from "../util";
 import { md } from "../md";
+import { invoke } from "@tauri-apps/api/core";
+import { run } from "../cli";
 import { channels, fetchMessages, fetchReactions, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
 import "emoji-picker-element";
 import { Database } from "emoji-picker-element";
@@ -20,6 +22,8 @@ const box = ref<HTMLElement>();
 const pickFor = ref<Msg | null>(null);
 const pickInsert = ref(false); // picker opened from the compose toolbar
 const input = ref<HTMLTextAreaElement>();
+const fileInput = ref<HTMLInputElement>();
+const uploading = ref(0);
 const reactions = ref<Record<string, Reaction[]>>({});
 const glyphs = reactive<Record<string, string>>({}); // shortcode -> emoji, resolved from the picker's own offline database
 const db = new Database({ dataSource: emojiData });
@@ -102,6 +106,38 @@ function keys(e: KeyboardEvent) {
   const f = (e.ctrlKey || e.metaKey) && FORMATS[e.key.toLowerCase()];
   if (f) { e.preventDefault(); wrap(f[0], f[1]); }
 }
+
+// ponytail: ClickUp has no public upload endpoint for chat, so images become attachments of a "mailbox" task and are embedded by URL.
+function uploadTask() {
+  let id = localStorage.getItem("uploadTask") ?? "";
+  if (!id) {
+    id = (prompt("ClickUp no permite subir imágenes al chat directamente. Indica el ID de una tarea que sirva de buzón para los adjuntos (por ejemplo, crea una llamada «Adjuntos del chat»). Se recordará.") ?? "").trim();
+    if (id) localStorage.setItem("uploadTask", id);
+  }
+  return id;
+}
+
+const resetUploadTask = () => { localStorage.removeItem("uploadTask"); uploadTask(); };
+
+async function upload(files: Iterable<File>) {
+  const list = [...files].filter((f) => f.type.startsWith("image/"));
+  if (!list.length) return;
+  const task = uploadTask();
+  if (!task) return;
+  uploading.value += list.length;
+  for (const f of list) {
+    await guard(async () => {
+      const name = (f.name || `pasted-${Date.now()}.png`).replace(/[^\w.-]/g, "_");
+      const path = await invoke<string>("save_temp", new Uint8Array(await f.arrayBuffer()), { headers: { "x-name": name } });
+      const o = await run(["attachment", "add", task, path]);
+      const url = o.stdout.match(/URL:\s*(https?:\/\/\S+)/)?.[1];
+      if (o.code || !url) throw new Error(o.stderr.trim() || o.stdout.trim() || "Sin URL en la respuesta");
+      wrap(`![${name}](${url}) `, "");
+    });
+    uploading.value--;
+  }
+}
+const onPaste = (e: ClipboardEvent) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); upload(fs); } };
 
 async function send() {
   const t = text.value.trim();
@@ -211,9 +247,12 @@ onUnmounted(() => clearInterval(timer));
             <a href="#" class="uk-icon-link ul" title="Subrayado (Ctrl+U)" @click.prevent="wrap('<u>', '</u>')">U</a>
             <a href="#" uk-icon="code" class="uk-icon-link" title="Código (Ctrl+E)" @click.prevent="wrap('`')"></a>
             <a href="#" uk-icon="happy" class="uk-icon-link" title="Emoji" @click.prevent="pickInsert = true"></a>
+            <a href="#" uk-icon="image" class="uk-icon-link" title="Imagen: clic para elegir, o pega / arrastra en el cuadro. Shift+clic cambia la tarea buzón." @click.prevent="$event.shiftKey ? resetUploadTask() : fileInput?.click()"></a>
+            <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="upload(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
+            <span v-if="uploading" class="uk-text-small uk-text-muted"><span uk-spinner="ratio: 0.5"></span> subiendo {{ uploading }}…</span>
           </div>
           <div class="uk-flex">
-            <textarea ref="input" class="uk-textarea" rows="2" v-model="text" placeholder="Escribe un mensaje (Ctrl+Enter para enviar)" @keydown.ctrl.enter="send" @keydown="keys"></textarea>
+            <textarea ref="input" class="uk-textarea" rows="2" v-model="text" placeholder="Escribe un mensaje (Ctrl+Enter para enviar)" @keydown.ctrl.enter="send" @keydown="keys" @paste="onPaste" @drop.prevent="upload($event.dataTransfer?.files ?? [])" @dragover.prevent></textarea>
             <button class="uk-button uk-button-primary uk-margin-small-left" :disabled="busy || !text.trim()">Enviar</button>
           </div>
         </form>
@@ -237,6 +276,7 @@ onUnmounted(() => clearInterval(timer));
 .md :deep(code) { background: #f3f3f3; padding: 0 4px; border-radius: 3px; }
 .md :deep(.mention) { color: #1e87f0; font-weight: 600; }
 .md :deep(.emo) { height: 1.4em; vertical-align: middle; }
+.md :deep(.img) { display: block; max-width: 420px; max-height: 320px; border-radius: 6px; margin: 4px 0; }
 .stack { margin-left: -6px; border: 2px solid #fff; }
 .pill { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 0 8px; margin-right: 4px; cursor: pointer; font-size: 13px; }
 .pill.mine { border-color: #1e87f0; background: #e8f2fd; }

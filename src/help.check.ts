@@ -60,4 +60,5 @@ assert.equal(md("[@Ana López](#user_mention#1) hi"), '<span class="mention">@An
 assert.equal(md("![:gandalf:](https://x.test/g.gif)"), '<img class="emo" src="https://x.test/g.gif" alt=":gandalf:" title=":gandalf:">');
 assert.equal(md('<script>alert(1)</script> [x](javascript:alert(1))'), "&lt;script&gt;alert(1)&lt;/script&gt; [x](javascript:alert(1))");
 assert.equal(md("snake_case_name and 2*3*4"), "snake_case_name and 2*3*4");
+assert.equal(md("![shot.png](https://x.test/s.png)"), '<img class="img" src="https://x.test/s.png" alt="shot.png" title="shot.png">');
 console.log("md.ts ok");
