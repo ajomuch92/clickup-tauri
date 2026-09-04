@@ -5,7 +5,7 @@ import { json, run } from "./cli";
 // ponytail: `clickup chat list` crashes on the API's numeric created_at (CLI bug), so everything goes through the raw `api --v3` endpoints.
 export type Channel = { id: string; name: string | null; type: string; latest_comment_at?: number; label?: string; memberIds?: string[] };
 export type User = { id: string; username: string; initials?: string; color?: string | null; profilePicture?: string | null; last_active?: string };
-export type Msg = { id: string; user_id: string; content: string; date: number; replies_count?: number };
+export type Msg = { id: string; user_id: string; content: string; date: number; date_updated?: number; replies_count?: number };
 
 export const session = reactive({ ws: "", me: "" });
 export const channels = ref<Channel[]>([]);

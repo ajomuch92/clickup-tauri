@@ -16,6 +16,9 @@ const active = ref<Channel | null>(null);
 const msgs = ref<Msg[]>([]);
 const text = ref("");
 const thread = ref<{ parent: Msg; replies: Msg[] } | null>(null);
+const editing = ref<Msg | null>(null);
+const editText = ref("");
+const edited = (m: Msg) => (m.date_updated ?? 0) > m.date + 2_000; // ClickUp stamps date_updated ~1s after creation even without edits
 const replyText = ref("");
 const error = ref("");
 const busy = ref(false);
@@ -187,6 +190,18 @@ async function react(e: CustomEvent) {
   });
 }
 
+function startEdit(m: Msg) {
+  editing.value = m;
+  editText.value = m.content;
+}
+async function saveEdit() {
+  const m = editing.value;
+  const t = editText.value.trim();
+  if (!m || !t) return;
+  if (t !== m.content) await guard(async () => { await post(`chat/messages/${m.id}`, { content: t }, "PATCH"); await load(); });
+  editing.value = null;
+}
+
 async function del(m: Msg) {
   if (!confirm("¿Borrar el mensaje? No se puede deshacer.")) return;
   await guard(async () => { await post(`chat/messages/${m.id}`, {}, "DELETE"); await load(); });
@@ -242,10 +257,16 @@ onUnmounted(() => clearInterval(timer));
               <span class="actions uk-margin-auto-left">
                 <a href="#" uk-icon="reply" class="uk-icon-link" title="Responder en hilo" @click.prevent="openThread(m)"></a>
                 <a href="#" uk-icon="happy" class="uk-icon-link" title="Reaccionar" @click.prevent="pickFor = m"></a>
+                <a v-if="m.user_id === session.me" href="#" uk-icon="pencil" class="uk-icon-link" title="Editar" @click.prevent="startEdit(m)"></a>
                 <a v-if="m.user_id === session.me" href="#" uk-icon="trash" class="uk-icon-link uk-text-danger" title="Borrar" @click.prevent="del(m)"></a>
               </span>
             </header>
-            <div class="uk-comment-body uk-margin-remove md" v-html="md(m.content)"></div>
+            <form v-if="editing?.id === m.id" class="uk-margin-small-top" @submit.prevent="saveEdit">
+              <textarea class="uk-textarea" rows="3" v-model="editText" @keydown.ctrl.enter="saveEdit" @keydown.esc="editing = null"></textarea>
+              <button class="uk-button uk-button-primary uk-button-small uk-margin-small-top" :disabled="busy">Guardar</button>
+              <button type="button" class="uk-button uk-button-default uk-button-small uk-margin-small-top uk-margin-small-left" @click="editing = null">Cancelar</button>
+            </form>
+            <div v-else class="uk-comment-body uk-margin-remove md" v-html="md(m.content) + (edited(m) ? ' <span class=\'uk-text-muted uk-text-small\'>(editado)</span>' : '')"></div>
             <div v-if="m.replies_count || reactions[m.id]?.length" class="uk-text-small uk-text-muted uk-margin-small-top">
               <button v-for="p in pills(m)" :key="p.code" class="pill" :class="{ mine: p.mine }" :title="p.code" @click="toggle(m, p.code, p.mine)">
                 {{ glyph(p.code) }} {{ p.count }}
@@ -304,7 +325,7 @@ onUnmounted(() => clearInterval(timer));
 .chat { display: flex; height: calc(100vh - 60px); gap: 20px; }
 .channels { width: 240px; flex: none; overflow: auto; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.messages { flex: 1; overflow: auto; }
+.messages { flex: 1; overflow: auto; padding-right: 14px; } /* keep action icons clear of the scrollbar */
 .thread { width: 360px; flex: none; display: flex; flex-direction: column; border-left: 1px solid #e5e5e5; padding-left: 16px; min-width: 0; }
 .thread-msgs { flex: 1; overflow: auto; }
 .thread .parent { border-bottom: 1px solid #e5e5e5; padding-bottom: 8px; }
