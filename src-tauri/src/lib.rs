@@ -54,12 +54,37 @@ async fn clickup(args: Vec<String>, stdin: Option<String>) -> Result<Out, String
         .map_err(|e| e.to_string())?
 }
 
+/// Write raw bytes (the invoke body) to a temp file so the CLI can upload them. File name comes in the `x-name` header.
+#[tauri::command]
+fn save_temp(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected a raw body".into());
+    };
+    let name: String = request
+        .headers()
+        .get("x-name")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("upload.png")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+    let dir = std::env::temp_dir().join("clickup-lite");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = dir.join(format!("{stamp}-{name}"));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_app() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![clickup])
+        .invoke_handler(tauri::generate_handler![clickup, save_temp])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
