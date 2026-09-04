@@ -46,6 +46,11 @@ export async function fetchMessages(channelId: string) {
   return (r.data ?? []).sort((a, b) => a.date - b.date);
 }
 
+export type Reaction = { reaction: string; user_id: string | number };
+export async function fetchReactions(msgId: string) {
+  return (await json<{ data: Reaction[] }>(["api", "--v3", v3(`chat/messages/${msgId}/reactions`)])).data ?? [];
+}
+
 export async function post(path: string, fields: Record<string, string>, method = "POST") {
   const o = await run(["api", "-X", method, "--v3", v3(path), ...Object.entries(fields).flatMap(([k, v]) => ["--raw-field", `${k}=${v}`])]);
   if (o.code) throw new Error(o.stderr.trim() || o.stdout.trim());

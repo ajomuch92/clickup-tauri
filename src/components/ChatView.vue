@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch as vwatch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch as vwatch } from "vue";
 import { fmtDateTime } from "../util";
-import { channels, fetchMessages, loadChannels, post, session, unread, who, type Channel, type Msg } from "../chat";
+import { channels, fetchMessages, fetchReactions, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
 import "emoji-picker-element";
+import { Database } from "emoji-picker-element";
 // ClickUp's reaction endpoint accepts Slack-style short names ("+1", "tada", "heart_eyes"); the iamcal preset is that list. Spanish presets emit localized names and are rejected.
 import emojiData from "emoji-picker-element-data/en/iamcal/data.json?url";
 
@@ -15,7 +16,9 @@ const error = ref("");
 const busy = ref(false);
 const box = ref<HTMLElement>();
 const pickFor = ref<Msg | null>(null);
-const reacted = ref<Record<string, string[]>>({}); // local echo of my reactions this session; the list endpoint does not inline them
+const reactions = ref<Record<string, Reaction[]>>({});
+const glyphs = reactive<Record<string, string>>({}); // shortcode -> emoji, resolved from the picker's own offline database
+const db = new Database({ dataSource: emojiData });
 let timer: number | undefined;
 
 const sorted = computed(() =>
@@ -27,12 +30,46 @@ async function guard<T>(fn: () => Promise<T>) {
   try { return await fn(); } catch (e) { error.value = String(e); }
 }
 
+const ALIAS: Record<string, string> = { thumbs_up: "+1", thumbs_down: "-1" }; // ClickUp's web UI stores these under names the Slack preset lacks
+function glyph(code: string) {
+  if (!(code in glyphs)) {
+    glyphs[code] = `:${code}:`;
+    db.getEmojiByShortcode(ALIAS[code] ?? code).then((e) => { if (e && "unicode" in e) glyphs[code] = e.unicode; });
+  }
+  return glyphs[code];
+}
+
+/** Group a message's reactions into pills: emoji, count, whether I am among them. */
+const pills = (m: Msg) => {
+  const g = new Map<string, { code: string; count: number; mine: boolean }>();
+  for (const r of reactions.value[m.id] ?? []) {
+    const p = g.get(r.reaction) ?? { code: r.reaction, count: 0, mine: false };
+    p.count++;
+    if (String(r.user_id) === session.me) p.mine = true;
+    g.set(r.reaction, p);
+  }
+  return [...g.values()];
+};
+
+async function loadReactions(id: string) {
+  reactions.value[id] = await fetchReactions(id);
+}
+
 async function load() {
   if (!active.value) return;
   msgs.value = await fetchMessages(active.value.id);
   delete unread[active.value.id];
   await nextTick();
   box.value?.scrollTo(0, box.value.scrollHeight);
+  // ponytail: the messages endpoint does not inline reactions, so this is one request per message; batch it if channels get long.
+  await Promise.all(msgs.value.map((m) => loadReactions(m.id).catch(() => {})));
+}
+
+async function toggle(m: Msg, code: string, mine: boolean) {
+  await guard(async () => {
+    await post(`chat/messages/${m.id}/reactions${mine ? `/${encodeURIComponent(code)}` : ""}`, mine ? {} : { reaction: code }, mine ? "DELETE" : "POST");
+    await loadReactions(m.id);
+  });
 }
 
 function open(ch: Channel) {
@@ -65,7 +102,7 @@ async function react(e: CustomEvent) {
       try { await post(`chat/messages/${m.id}/reactions`, { reaction: code }); err = null; break; } catch (x) { err = x; }
     }
     if (err) throw err;
-    (reacted.value[m.id] ??= []).push(e.detail.unicode);
+    await loadReactions(m.id);
   });
 }
 
@@ -119,8 +156,10 @@ onUnmounted(() => clearInterval(timer));
               </span>
             </header>
             <div class="uk-comment-body uk-margin-remove" style="white-space: pre-wrap">{{ m.content }}</div>
-            <div v-if="m.replies_count || reacted[m.id]" class="uk-text-small uk-text-muted">
-              <span v-for="(u, i) in reacted[m.id]" :key="i" class="uk-margin-small-right">{{ u }}</span>
+            <div v-if="m.replies_count || reactions[m.id]?.length" class="uk-text-small uk-text-muted uk-margin-small-top">
+              <button v-for="p in pills(m)" :key="p.code" class="pill" :class="{ mine: p.mine }" :title="p.code" @click="toggle(m, p.code, p.mine)">
+                {{ glyph(p.code) }} {{ p.count }}
+              </button>
               <span v-if="m.replies_count">{{ m.replies_count }} respuestas</span>
             </div>
           </article>
@@ -150,5 +189,7 @@ onUnmounted(() => clearInterval(timer));
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .messages { flex: 1; overflow: auto; }
 .actions a { margin-left: 8px; }
+.pill { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 0 8px; margin-right: 4px; cursor: pointer; font-size: 13px; }
+.pill.mine { border-color: #1e87f0; background: #e8f2fd; }
 .picker-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 </style>
