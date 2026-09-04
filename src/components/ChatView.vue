@@ -57,14 +57,17 @@ async function loadReactions(id: string) {
   reactions.value[id] = await fetchReactions(id);
 }
 
+// ponytail: reactions are one request per message and ClickUp allows 100/min, so only the newest 20 get them.
+const REACTION_WINDOW = 20;
+const refreshReactions = () => Promise.all(msgs.value.slice(-REACTION_WINDOW).map((m) => loadReactions(m.id).catch(() => {})));
+
 async function load() {
   if (!active.value) return;
   msgs.value = await fetchMessages(active.value.id);
   delete unread[active.value.id];
   await nextTick();
   box.value?.scrollTo(0, box.value.scrollHeight);
-  // ponytail: the messages endpoint does not inline reactions, so this is one request per message; batch it if channels get long.
-  await Promise.all(msgs.value.map((m) => loadReactions(m.id).catch(() => {})));
+  await refreshReactions();
 }
 
 async function toggle(m: Msg, code: string, mine: boolean) {
@@ -114,6 +117,8 @@ async function del(m: Msg) {
 }
 
 vwatch(() => props.openId, (id) => { const c = channels.value.find((c) => c.id === id); if (c) open(c); });
+// The global watcher (chat.ts) already polls channel activity; reload messages only when this channel's last-message stamp moves.
+vwatch(() => channels.value.find((c) => c.id === active.value?.id)?.latest_comment_at, (now, before) => { if (before !== undefined && now !== before) load().catch(() => {}); });
 
 onMounted(async () => {
   await guard(async () => {
@@ -121,7 +126,7 @@ onMounted(async () => {
     const c = channels.value.find((c) => c.id === props.openId);
     if (c) open(c);
   });
-  timer = window.setInterval(() => guard(load), 30_000);
+  timer = window.setInterval(() => refreshReactions(), 120_000); // background: silent on rate limit, retries next tick
 });
 onUnmounted(() => clearInterval(timer));
 </script>

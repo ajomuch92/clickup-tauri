@@ -49,8 +49,11 @@ async function label(ch: Channel) {
 export async function loadChannels() {
   await loadSession();
   const fresh = (await json<{ data: Channel[] }>(["api", "--v3", v3("chat/channels")])).data ?? [];
-  const known = new Map(channels.value.map((c) => [c.id, c.label]));
-  await Promise.all(fresh.map(async (c) => (c.label = known.get(c.id)) || label(c)));
+  const known = new Map(channels.value.map((c) => [c.id, c]));
+  await Promise.all(fresh.map(async (c) => {
+    const k = known.get(c.id);
+    if (k?.label) { c.label = k.label; c.memberIds = k.memberIds; } else await label(c);
+  }));
   channels.value = fresh;
   return fresh;
 }
