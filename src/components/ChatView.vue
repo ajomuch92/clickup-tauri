@@ -4,7 +4,7 @@ import { fmtDateTime } from "../util";
 import { md } from "../md";
 import { invoke } from "@tauri-apps/api/core";
 import { run } from "../cli";
-import { channels, fetchMessages, fetchReactions, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
+import { channels, fetchMessages, fetchReactions, fetchReplies, loadChannels, post, session, unread, who, type Channel, type Msg, type Reaction } from "../chat";
 import "emoji-picker-element";
 import { Database } from "emoji-picker-element";
 import Avatar from "./Avatar.vue";
@@ -15,7 +15,8 @@ const props = defineProps<{ openId?: string | null }>();
 const active = ref<Channel | null>(null);
 const msgs = ref<Msg[]>([]);
 const text = ref("");
-const replyTo = ref<Msg | null>(null);
+const thread = ref<{ parent: Msg; replies: Msg[] } | null>(null);
+const replyText = ref("");
 const error = ref("");
 const busy = ref(false);
 const box = ref<HTMLElement>();
@@ -77,6 +78,7 @@ async function load() {
   await nextTick();
   box.value?.scrollTo(0, box.value.scrollHeight);
   await refreshReactions(OPEN_WINDOW, true);
+  if (thread.value) thread.value.replies = await fetchReplies(thread.value.parent.id).catch(() => thread.value!.replies);
 }
 
 async function toggle(m: Msg, code: string, mine: boolean) {
@@ -88,8 +90,26 @@ async function toggle(m: Msg, code: string, mine: boolean) {
 
 function open(ch: Channel) {
   active.value = ch;
-  replyTo.value = null;
+  thread.value = null;
   guard(load);
+}
+
+async function openThread(m: Msg) {
+  thread.value = { parent: m, replies: [] };
+  await guard(async () => { thread.value = { parent: m, replies: await fetchReplies(m.id) }; });
+}
+
+async function sendReply() {
+  const t = replyText.value.trim();
+  if (!thread.value || !t) return;
+  busy.value = true;
+  await guard(async () => {
+    await post(`chat/messages/${thread.value!.parent.id}/replies`, { type: "message", content: t });
+    replyText.value = "";
+    thread.value!.replies = await fetchReplies(thread.value!.parent.id);
+    thread.value!.parent.replies_count = thread.value!.replies.length;
+  });
+  busy.value = false;
 }
 
 /** Wrap the textarea selection (or insert at the caret) and keep focus. */
@@ -144,9 +164,8 @@ async function send() {
   if (!active.value || !t) return;
   busy.value = true;
   await guard(async () => {
-    await post(replyTo.value ? `chat/messages/${replyTo.value.id}/replies` : `chat/channels/${active.value!.id}/messages`, { type: "message", content: t });
+    await post(`chat/channels/${active.value!.id}/messages`, { type: "message", content: t });
     text.value = "";
-    replyTo.value = null;
     await load();
   });
   busy.value = false;
@@ -221,7 +240,7 @@ onUnmounted(() => clearInterval(timer));
               <Avatar :id="m.user_id" :size="32" class="uk-margin-small-right" />
               <b>{{ who(m.user_id) }}</b> <span class="uk-text-muted uk-text-small uk-margin-small-left">{{ fmtDateTime(m.date) }}</span>
               <span class="actions uk-margin-auto-left">
-                <a href="#" uk-icon="reply" class="uk-icon-link" title="Responder" @click.prevent="replyTo = m"></a>
+                <a href="#" uk-icon="reply" class="uk-icon-link" title="Responder en hilo" @click.prevent="openThread(m)"></a>
                 <a href="#" uk-icon="happy" class="uk-icon-link" title="Reaccionar" @click.prevent="pickFor = m"></a>
                 <a v-if="m.user_id === session.me" href="#" uk-icon="trash" class="uk-icon-link uk-text-danger" title="Borrar" @click.prevent="del(m)"></a>
               </span>
@@ -231,16 +250,12 @@ onUnmounted(() => clearInterval(timer));
               <button v-for="p in pills(m)" :key="p.code" class="pill" :class="{ mine: p.mine }" :title="p.code" @click="toggle(m, p.code, p.mine)">
                 {{ glyph(p.code) }} {{ p.count }}
               </button>
-              <span v-if="m.replies_count">{{ m.replies_count }} respuestas</span>
+              <a v-if="m.replies_count" href="#" @click.prevent="openThread(m)">{{ m.replies_count }} respuestas</a>
             </div>
           </article>
           <p v-if="!msgs.length" class="uk-text-muted">Sin mensajes.</p>
         </div>
         <form class="uk-margin-small-top" @submit.prevent="send">
-          <div v-if="replyTo" class="uk-text-small uk-text-muted">
-            Respondiendo a {{ who(replyTo.user_id) }}: “{{ replyTo.content.slice(0, 60) }}”
-            <a href="#" uk-icon="close" class="uk-icon-link" @click.prevent="replyTo = null"></a>
-          </div>
           <div class="toolbar">
             <a href="#" uk-icon="bold" class="uk-icon-link" title="Negrita (Ctrl+B)" @click.prevent="wrap('**')"></a>
             <a href="#" uk-icon="italic" class="uk-icon-link" title="Cursiva (Ctrl+I)" @click.prevent="wrap('_')"></a>
@@ -258,6 +273,27 @@ onUnmounted(() => clearInterval(timer));
         </form>
       </template>
     </div>
+
+    <div v-if="thread" class="thread">
+      <div class="uk-flex uk-flex-between uk-flex-middle uk-margin-small-bottom">
+        <h4 class="uk-margin-remove">Hilo</h4>
+        <a href="#" uk-icon="close" class="uk-icon-link" @click.prevent="thread = null"></a>
+      </div>
+      <div class="thread-msgs">
+        <article v-for="m in [thread.parent, ...thread.replies]" :key="m.id" class="uk-comment uk-margin-small" :class="{ parent: m.id === thread.parent.id }">
+          <header class="uk-comment-header uk-margin-remove uk-flex uk-flex-middle">
+            <Avatar :id="m.user_id" :size="26" class="uk-margin-small-right" />
+            <b>{{ who(m.user_id) }}</b> <span class="uk-text-muted uk-text-small uk-margin-small-left">{{ fmtDateTime(m.date) }}</span>
+          </header>
+          <div class="uk-comment-body uk-margin-remove md uk-text-small" v-html="md(m.content)"></div>
+        </article>
+        <p v-if="!thread.replies.length" class="uk-text-muted uk-text-small">Sin respuestas aún.</p>
+      </div>
+      <form class="uk-margin-small-top" @submit.prevent="sendReply">
+        <textarea class="uk-textarea" rows="2" v-model="replyText" placeholder="Responder en el hilo (Ctrl+Enter)" @keydown.ctrl.enter="sendReply"></textarea>
+        <button class="uk-button uk-button-primary uk-button-small uk-margin-small-top" :disabled="busy || !replyText.trim()">Responder</button>
+      </form>
+    </div>
   </div>
   <div v-if="pickFor || pickInsert" class="picker-overlay" @click.self="pickFor = null; pickInsert = false">
     <emoji-picker :data-source="emojiData" @emoji-click="react($event as CustomEvent)"></emoji-picker>
@@ -269,6 +305,9 @@ onUnmounted(() => clearInterval(timer));
 .channels { width: 240px; flex: none; overflow: auto; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .messages { flex: 1; overflow: auto; }
+.thread { width: 360px; flex: none; display: flex; flex-direction: column; border-left: 1px solid #e5e5e5; padding-left: 16px; min-width: 0; }
+.thread-msgs { flex: 1; overflow: auto; }
+.thread .parent { border-bottom: 1px solid #e5e5e5; padding-bottom: 8px; }
 .actions a { margin-left: 8px; }
 .toolbar a { margin-right: 10px; }
 .toolbar .ul { text-decoration: underline; font-weight: 700; font-size: 15px; }
